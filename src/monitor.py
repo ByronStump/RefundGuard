@@ -39,11 +39,11 @@ def _find_subprocess_windows(process):
             continue
         image_name = row[0]
         pid_str = row[1]
-        window_title = row[8] if len(row) > 8 else ""
-        haystack = f"{image_name} {window_title}"
-        if matcher.search(haystack):
+        if not image_name.lower().endswith(".exe"):
+            continue
+        if matcher.search(image_name):
             try:
-                return int(pid_str), haystack
+                return int(pid_str), image_name
             except ValueError:
                 continue
     return None, None
@@ -62,27 +62,43 @@ def find_subprocess(process):
             continue
     return None, None
 
-def monitor_process(process_name, limit_minutes=115):
-    while True:
-        pid, cmd = find_subprocess(process_name)
-        if pid:
-            print(f"Found process PID: {pid}\nLaunched with CMD: {cmd}")
-            break
-        time.sleep(10)
+def _is_process_running_windows(pid: int) -> bool:
+    result = _run_tasklist(["tasklist", "/fi", f"PID eq {pid}", "/fo", "csv"])
+    if result is None or not result.stdout:
+        return False
+    return str(pid) in result.stdout
 
-    remaining_seconds = limit_minutes * 60
-    if os.name == "nt":
-        start_time = _get_process_start_time_windows(pid)
-        if start_time:
-            elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
-            remaining_seconds = max(0, remaining_seconds - int(elapsed))
+def monitor_process(process_name, limit_minutes=1, status_interval_minutes=15):
+    try:
+        while True:
+            pid, cmd = find_subprocess(process_name)
+            if pid:
+                print(f"\nFound process PID: {pid}\nExecutable: {cmd}")
+                break
+            time.sleep(10)
 
-    if remaining_seconds > 0:
-        time.sleep(remaining_seconds)
+        remaining_seconds = limit_minutes * 60
+        if os.name == "nt":
+            start_time = _get_process_start_time_windows(pid)
+            if start_time:
+                elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+                remaining_seconds = max(0, remaining_seconds - int(elapsed))
 
-    if os.name == "nt":
-        _terminate_process_windows(pid)
-    print("Time limit reached. Process closed.")
+        interval = max(60, int(status_interval_minutes * 60))
+        while remaining_seconds > 0:
+            if os.name == "nt" and not _is_process_running_windows(pid):
+                print("\nProcess ended early. Exiting.")
+                return
+            print(f"\nTime remaining: {remaining_seconds // 60} minutes")
+            sleep_for = min(interval, remaining_seconds)
+            time.sleep(sleep_for)
+            remaining_seconds -= sleep_for
+
+        if os.name == "nt":
+            _terminate_process_windows(pid)
+        print("\nTime limit reached. Process closed.")
+    except KeyboardInterrupt:
+        print("\nCancelled by user. Exiting gracefully.")
         
 def _get_process_start_time_windows(pid: int):
     try:
