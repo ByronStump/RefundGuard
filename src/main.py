@@ -1,20 +1,16 @@
+import time
 import subprocess
+import threading
+from monitor import monitor_process
+
+
 def main():
-    process_name = input("Input process name to find: ")
+    process_name = input("Input Steam game name to find: ").strip()
     print(f"Attempting to find: {process_name}")
-    pid, cmd = find_subprocess(process_name)
-    if pid:
-        print(f"Found process PID: {pid}\nLaunched with CMD: {cmd}")
-    else:
-        print(f"No PID found for {process_name}")
-def find_subprocess(process):
-    pids = subprocess.run(["ps", "-e", "-o", "pid,cmd"], capture_output=True, text=True)
-    for line in pids.stdout.splitlines():
-        pid, cmd = line.strip().split(" ", 1)
-        if process in cmd:
-            return int(pid), cmd
-    return None, None
-    
+    if not process_name:
+        print("Game name cannot be empty.")
+        return
+    monitor_process(process_name)
     
 if __name__ == "__main__":
     main()
