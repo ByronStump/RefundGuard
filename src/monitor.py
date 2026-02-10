@@ -2,15 +2,61 @@ import subprocess
 import time
 import threading
 import os
+import csv
+import io
+import re
 
+def _make_process_regex(process):
+    tokens = [re.escape(t) for t in process.strip().split()]
+    pattern = r"[ \-._]*".join(tokens) + r"(?:\.exe)?"
+    return re.compile(pattern, re.IGNORECASE)
+
+def _run_tasklist(args):
+    try:
+        return subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+
+def _find_subprocess_windows(process):
+    result = _run_tasklist(["tasklist", "/v", "/fo", "csv"])
+    if result is None or not result.stdout:
+        result = _run_tasklist(["tasklist", "/fo", "csv"])
+        if result is None or not result.stdout:
+            return None, None
+
+    matcher = _make_process_regex(process)
+    reader = csv.reader(io.StringIO(result.stdout))
+    headers = next(reader, None)
+    for row in reader:
+        # Columns: Image Name, PID, Session Name, Session#, Mem Usage, Status, User Name, CPU Time, Window Title
+        if len(row) < 2:
+            continue
+        image_name = row[0]
+        pid_str = row[1]
+        window_title = row[8] if len(row) > 8 else ""
+        haystack = f"{image_name} {window_title}"
+        if matcher.search(haystack):
+            try:
+                return int(pid_str), haystack
+            except ValueError:
+                continue
+    return None, None
 
 def find_subprocess(process):
+    if os.name == "nt":
+        return _find_subprocess_windows(process)
+    matcher = _make_process_regex(process)
     pids = subprocess.run(["ps", "-e", "-o", "pid,cmd"], capture_output=True, text=True)
     for line in pids.stdout.splitlines():
-        print(line)
         try:
             pid, cmd = line.strip().split(" ", 1)
-            if process in cmd:
+            if matcher.search(cmd):
                 return int(pid), cmd
         except ValueError:
             continue
