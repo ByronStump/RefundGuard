@@ -1,10 +1,10 @@
 import subprocess
 import time
-import threading
 import os
 import csv
 import io
 import re
+from datetime import datetime, timezone
 
 def _make_process_regex(process):
     tokens = [re.escape(t) for t in process.strip().split()]
@@ -62,10 +62,54 @@ def find_subprocess(process):
             continue
     return None, None
 
-def monitor_process(process_name):
+def monitor_process(process_name, limit_minutes=115):
     while True:
         pid, cmd = find_subprocess(process_name)
-        if (pid):
+        if pid:
             print(f"Found process PID: {pid}\nLaunched with CMD: {cmd}")
             break
         time.sleep(10)
+
+    remaining_seconds = limit_minutes * 60
+    if os.name == "nt":
+        start_time = _get_process_start_time_windows(pid)
+        if start_time:
+            elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+            remaining_seconds = max(0, remaining_seconds - int(elapsed))
+
+    if remaining_seconds > 0:
+        time.sleep(remaining_seconds)
+
+    if os.name == "nt":
+        _terminate_process_windows(pid)
+    print("Time limit reached. Process closed.")
+        
+def _get_process_start_time_windows(pid: int):
+    try:
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                f"(Get-Process -Id {pid}).StartTime.ToUniversalTime().ToString('o')",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        value = result.stdout.strip()
+        if not value:
+            return None
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+def _terminate_process_windows(pid: int):
+    subprocess.run(
+        ["taskkill", "/PID", str(pid), "/F"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
