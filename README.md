@@ -1,4 +1,4 @@
-# Steam 2 Hour Trial
+# RefundGuard
 
 A simple Windows-only utility that watches a Steam game process and closes it when your playtime reaches approximately 5 minutes before you are unable to refund the game.
 
